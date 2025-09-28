@@ -1,0 +1,54 @@
+% Data for nurse_scheduling.mzn corresponding to main.py example
+num_nurses = 5;
+num_shifts = 3;
+num_days = 7;
+
+% shift_requests[nurse, day, shift]
+% Converted from Python list (0/1) to 1-based indexing.
+shift_requests =
+% Nurse 1
+[
+| 0,0,1  % Day 1
+| 0,0,0  % Day 2
+| 0,0,0  % Day 3
+| 0,0,0  % Day 4
+| 0,0,1  % Day 5
+| 0,1,0  % Day 6
+| 0,0,1  % Day 7
+,
+% Nurse 2
+  0,0,0 |
+  0,0,0 |
+  0,1,0 |
+  0,1,0 |
+  1,0,0 |
+  0,0,0 |
+  0,0,1 |
+,
+% Nurse 3
+  0,1,0 |
+  0,1,0 |
+  0,0,0 |
+  1,0,0 |
+  0,0,0 |
+  0,1,0 |
+  0,0,0 |
+,
+% Nurse 4
+  0,0,1 |
+  0,0,0 |
+  1,0,0 |
+  0,1,0 |
+  0,0,0 |
+  1,0,0 |
+  0,0,0 |
+,
+% Nurse 5
+  0,0,0 |
+  0,0,1 |
+  0,1,0 |
+  0,0,0 |
+  1,0,0 |
+  0,1,0 |
+  0,0,0 |
+];
