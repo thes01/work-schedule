@@ -1,7 +1,7 @@
 """Monthly nurse scheduling using CP-SAT.
 
 Rules encoded (per user specification):
-* 2 shifts: Day (D, 11h) and Night (N, 12h)
+* 2 shifts: Day (D, 11h) and Night (N, 11h)
 * Planning horizon: 4 full weeks (Mon-Sun) + 3 workdays (Mon-Tue-Wed) => 31 days starting on Monday.
   - 23 workdays (Mon-Fri excluding weekends) and 8 weekend days (Saturdays and Sundays within first 4 weeks)
 * 19 nurses total
@@ -39,7 +39,7 @@ class ProblemData:
 	num_nurses: int = 19
 	num_days: int = 31  # 4 weeks (28) + 3 workdays
 	day_shift_hours: int = 11
-	night_shift_hours: int = 12
+	night_shift_hours: int = 11
 	min_hours: int = 143
 	max_hours: int = 146
 	target_hours: int = 145  # for balancing objective
