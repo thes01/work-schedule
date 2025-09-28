@@ -23,6 +23,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List
 import csv
+from pathlib import Path
+
+try:
+	from openpyxl import Workbook
+	from openpyxl.styles import PatternFill, Alignment, Font
+	from openpyxl.utils import get_column_letter
+except ImportError:  # graceful fallback if not installed yet
+	Workbook = None  # type: ignore
 from ortools.sat.python import cp_model
 
 
@@ -270,25 +278,100 @@ def build_and_solve(data: ProblemData) -> None:
 			f"Day {d:02d} {dow} {tag} | D:{len(day_workers)} -> {day_workers} | N:{night_worker}"
 		)
 
-	# CSV Export: nurses as rows (1-based), days as columns (1-based)
-	csv_filename = "schedule.csv"
-	with open(csv_filename, "w", newline="", encoding="utf-8") as f:
-		# Use semicolon as requested
-		writer = csv.writer(f, delimiter=';')
-		header = ["Nurse\\Day"] + [str(d + 1) for d in days]
-		writer.writerow(header)
+	# Excel Export with summaries and formatting
+	if Workbook is None:
+		print("openpyxl not installed: skipping Excel export. Install 'openpyxl' to enable.")
+	else:
+		wb = Workbook()
+		ws = wb.active
+		ws.title = "Schedule"
+
+		# Header row: A1 = 'Nurse', then days 1..num_days
+		ws.cell(row=1, column=1, value="Nurse")
+		for d in days:
+			ws.cell(row=1, column=2 + d, value=d + 1)
+
+		# Data rows start at row=2
+		# We will collect column day/night counts in arrays
+		day_counts = [0] * data.num_days
+		night_counts = [0] * data.num_days
+
+		WE_FILL = PatternFill(start_color="FFE9CC", end_color="FFE9CC", fill_type="solid")  # weekend
+		DAY_FILL = PatternFill(start_color="E0F4FF", end_color="E0F4FF", fill_type="solid")  # weekday day
+		NIGHT_FILL = PatternFill(start_color="FFE0E0", end_color="FFE0E0", fill_type="solid")  # weekday night
+		WE_DAY_FILL = PatternFill(start_color="FFD8A6", end_color="FFD8A6", fill_type="solid")  # weekend day
+		WE_NIGHT_FILL = PatternFill(start_color="FFB3B3", end_color="FFB3B3", fill_type="solid")  # weekend night
+		HEADER_FILL = PatternFill(start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
+
+		for c in range(1, data.num_days + 2):
+			cell = ws.cell(row=1, column=c)
+			cell.fill = HEADER_FILL
+			cell.font = Font(bold=True)
+			cell.alignment = Alignment(horizontal="center")
+
 		for n in nurses:
-			row = [n + 1]
+			row_index = 2 + n
+			ws.cell(row=row_index, column=1, value=n + 1)
+			row_day_shifts = 0
+			row_night_shifts = 0
+			row_hours = 0
 			for d in days:
-				# Per requirement: cell contains 11 (day shift) or 12 (night shift) if nurse works; leave blank if off.
+				cell = ws.cell(row=row_index, column=2 + d)
+				val = ""
+				is_we = (d < 28) and (d % 7 in (5, 6))
 				if solver.boolean_value(x[(n, d, D)]):
-					row.append(str(data.day_shift_hours))
+					val = data.day_shift_hours
+					row_day_shifts += 1
+					row_hours += data.day_shift_hours
+					day_counts[d] += 1
+					cell.fill = WE_DAY_FILL if is_we else DAY_FILL
 				elif solver.boolean_value(x[(n, d, N)]):
-					row.append(str(data.night_shift_hours))
+					val = data.night_shift_hours
+					row_night_shifts += 1
+					row_hours += data.night_shift_hours
+					night_counts[d] += 1
+					cell.fill = WE_NIGHT_FILL if is_we else NIGHT_FILL
 				else:
-					row.append("")  # Off day
-			writer.writerow(row)
-	print(f"\nCSV exported to {csv_filename}")
+					# Off day fill: weekend highlight or leave blank
+					if is_we:
+						cell.fill = WE_FILL
+				if val != "":
+					cell.value = val
+				cell.alignment = Alignment(horizontal="center")
+			# Append row summaries: total hours and total shifts
+			ws.cell(row=row_index, column=2 + data.num_days, value=row_hours)
+			ws.cell(row=row_index, column=3 + data.num_days, value=row_day_shifts + row_night_shifts)
+
+		# Footer rows for day & night counts under the data (and labels)
+		day_sum_row = 2 + data.num_nurses + 1
+		night_sum_row = day_sum_row + 1
+		label_day = ws.cell(row=day_sum_row, column=1, value="Sum Day Shifts")
+		label_night = ws.cell(row=night_sum_row, column=1, value="Sum Night Shifts")
+		label_day.font = Font(bold=True)
+		label_night.font = Font(bold=True)
+		for d in days:
+			ws.cell(row=day_sum_row, column=2 + d, value=day_counts[d])
+			ws.cell(row=night_sum_row, column=2 + d, value=night_counts[d])
+		for c in range(1, 2 + data.num_days):
+			ws.cell(row=day_sum_row, column=c).alignment = Alignment(horizontal="center")
+			ws.cell(row=night_sum_row, column=c).alignment = Alignment(horizontal="center")
+
+		# Headers for summary columns
+		ws.cell(row=1, column=2 + data.num_days, value="Hours").font = Font(bold=True)
+		ws.cell(row=1, column=3 + data.num_days, value="TotalShifts").font = Font(bold=True)
+		ws.cell(row=day_sum_row, column=2 + data.num_days, value="-")
+		ws.cell(row=night_sum_row, column=2 + data.num_days, value="-")
+		ws.cell(row=day_sum_row, column=3 + data.num_days, value="-")
+		ws.cell(row=night_sum_row, column=3 + data.num_days, value="-")
+
+		# Auto width (simple heuristic)
+		for col in range(1, 4 + data.num_days):
+			col_letter = get_column_letter(col)
+			ws.column_dimensions[col_letter].width = 5 if col > 1 else 8
+
+		excel_path = Path("schedule.xlsx")
+		wb.save(excel_path)
+		print(f"\nExcel exported to {excel_path}")
 
 	print("\n=== Solver Stats ===")
 	print(f"Conflicts: {solver.num_conflicts}")
