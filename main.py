@@ -3,11 +3,11 @@
 Key rules (updated):
 * Shifts: Day (D, 11h; nurse 1 Mon-Thu 10h), Night (N, 12h), R8 (8h morning), O8 (8h afternoon).
 * New rule: Each base nurse must work exactly one O8 shift (on a workday) in the month.
-* Exactly one O8 shift per workday overall (was previously among extras only; now includes base nurses).
+* Exactly two O8 shifts per workday overall (was previously one; now increased, counting base + extra nurses).
 * First extra nurse (index 19, nurse no. 20) is R8-only; other extra nurses can take R8 or O8.
 * Horizon: 31 days (Mon start): 4 full weeks + 3 extra workdays.
 * Base nurses: 19 (indices 0..18). Extra 8h-only nurses: 3 (indices 19..21). Nurse numbering displayed 1-based.
-* Workday demand: total day-like (D+R8+O8) in [9,10]; exactly 1 night; exactly 1 O8.
+* Workday demand: total day-like (D+R8+O8) in [9,10]; exactly 1 night; exactly 2 O8.
 * Weekend demand: day D in [5,6]; exactly 1 night; extra nurses off (no O8 on weekends).
 * Base nurse hours normally in [143,146] except:
 		- Nurse 1 (index 0): custom 10h for Mon-Thu day shifts.
@@ -48,7 +48,7 @@ class ProblemData:
 	extra_nurses: int = 3
 	num_days: int = 31  # 4 weeks (28) + 3 workdays
 	day_shift_hours: int = 11  # Standard day hours (nurse 1 has custom 10h Mon-Thu non-weekend)
-	night_shift_hours: int = 12 
+	night_shift_hours: int = 11 
 	eight_hour_shift_hours: int = 8  # R8 / O8
 	min_hours: int = 140  # base nurse min hours
 	max_hours: int = 146  # base nurse max hours
@@ -117,7 +117,7 @@ def build_and_solve(data: ProblemData) -> None:
 			model.add_at_most_one(x[(n, d, s)] for s in nurse_shifts[n])
 
 	# 2) Daily demand constraints
-	# Workdays: (D + R8 + O8) in [workday_shift_min, workday_shift_max]; exactly 1 night (base nurses only); EXACTLY one O8 across all eligible nurses.
+	# Workdays: (D + R8 + O8) in [workday_shift_min, workday_shift_max]; exactly 1 night (base nurses only); EXACTLY two O8 across all eligible nurses.
 	for d in workdays:
 		day_like = []
 		day_like.extend(x[(n, d, D)] for n in base_nurses if (n, d, D) in x)
@@ -127,11 +127,11 @@ def build_and_solve(data: ProblemData) -> None:
 		day_like.extend(x[(n, d, s)] for n in extra_nurses for s in (R8, O8) if (n, d, s) in x)
 		model.add_linear_constraint(sum(day_like), data.workday_shift_min, data.workday_shift_max)
 		model.add(sum(x[(n, d, N)] for n in base_nurses if (n, d, N) in x) == 1)
-		# Exactly one O8 across all nurses that can perform O8 (exclude R8-only extra)
+		# Exactly two O8 across all nurses that can perform O8 (exclude R8-only extra)
 		model.add(
 			sum(x[(n, d, O8)] for n in base_nurses if (n, d, O8) in x)
 			+ sum(x[(n, d, O8)] for n in extra_nurses if (n, d, O8) in x)
-			== 1
+			== 2
 		)
 	# Weekends: (D) in [5,6]; exactly 1 night; extra nurses off.
 	for d in weekend_days:
@@ -454,7 +454,7 @@ def build_and_solve(data: ProblemData) -> None:
 		if extra_nurses:
 			first_extra = extra_nurses[0]  # nurse 20 (index 19) R8-only
 			cell_extra = ws.cell(row=2 + first_extra, column=1)
-			cell_extra.comment = Comment("Pečovatelka 20: Pouze R8 (bez O8). Ostatní extra: R8/O8. 1 O8 za pracovní den.", "System")
+			cell_extra.comment = Comment("Pečovatelka 20: Pouze R8 (bez O8). Ostatní extra: R8/O8. 2 O8 za pracovní den.", "System")
 		# Comment for reduced nurse 2
 		reduced_cell = ws.cell(row=2 + 1, column=1)
 		reduced_cell.comment = Comment("Pečovatelka 2: Snížený úvazek 106-109 hodin.", "System")
@@ -489,7 +489,7 @@ def build_and_solve(data: ProblemData) -> None:
 		# ws.cell(row=legend_row, column=2, value="D=Day 11h")
 		# ws.cell(row=legend_row, column=5, value="N=Noční 11h")
 		ws.cell(row=legend_row, column=7, value="R8=Ranní 8h")
-		ws.cell(row=legend_row, column=9, value="O8=Odpolední 8h (1 za den)")
+		ws.cell(row=legend_row, column=9, value="O8=Odpolední 8h (2 za den)")
 		ws.cell(row=legend_row, column=7).fill = R8_FILL
 		ws.cell(row=legend_row, column=9).fill = O8_FILL
 
