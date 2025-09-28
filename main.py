@@ -28,6 +28,7 @@ from pathlib import Path
 try:
 	from openpyxl import Workbook
 	from openpyxl.styles import PatternFill, Alignment, Font
+	from openpyxl.comments import Comment
 	from openpyxl.utils import get_column_letter
 except ImportError:  # graceful fallback if not installed yet
 	Workbook = None  # type: ignore
@@ -91,7 +92,16 @@ def build_and_solve(data: ProblemData) -> None:
 	hours = []
 	deviations = []  # absolute deviations from target
 	for n in nurses:
-		day_hours = data.day_shift_hours * sum(x[(n, d, D)] for d in days)
+		# Per-nurse day hours: nurse index 0 (user nurse 1) has 10h Mon-Thu (non-weekend), 11h Fri/weekend; others 11h.
+		day_hours_terms = []
+		for d in days:
+			coef = data.day_shift_hours
+			if n == 0:
+				dow = d % 7
+				if (not ((d < 28) and (dow in (5,6)))) and dow in (0,1,2,3):  # Mon-Thu and not weekend
+					coef = 10
+			day_hours_terms.append(coef * x[(n, d, D)])
+		day_hours = sum(day_hours_terms)
 		night_hours = data.night_shift_hours * sum(x[(n, d, N)] for d in days)
 		h = day_hours + night_hours
 		hours.append(h)
@@ -320,9 +330,17 @@ def build_and_solve(data: ProblemData) -> None:
 				val = ""
 				is_we = (d < 28) and (d % 7 in (5, 6))
 				if solver.boolean_value(x[(n, d, D)]):
-					val = data.day_shift_hours
+					# Determine per-nurse day shift hours (nurse 1 has 10h Mon-Thu non-weekend)
+					if n == 0:
+						dow = d % 7
+						if (not is_we) and dow in (0,1,2,3):
+							val = 10
+						else:
+							val = data.day_shift_hours
+					else:
+						val = data.day_shift_hours
 					row_day_shifts += 1
-					row_hours += data.day_shift_hours
+					row_hours += int(val)
 					day_counts[d] += 1
 					cell.fill = WE_DAY_FILL if is_we else DAY_FILL
 				elif solver.boolean_value(x[(n, d, N)]):
@@ -341,6 +359,10 @@ def build_and_solve(data: ProblemData) -> None:
 			# Append row summaries: total hours and total shifts
 			ws.cell(row=row_index, column=2 + data.num_days, value=row_hours)
 			ws.cell(row=row_index, column=3 + data.num_days, value=row_day_shifts + row_night_shifts)
+
+		# Add note/comment for nurse 1 special rule
+		first_nurse_cell = ws.cell(row=2, column=1)
+		first_nurse_cell.comment = Comment("Nurse 1: Mon-Thu day shifts are 10h; Fri/weekend day shifts 11h; nights unchanged", "System")
 
 		# Footer rows for day & night counts under the data (and labels)
 		day_sum_row = 2 + data.num_nurses + 1
