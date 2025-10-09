@@ -38,7 +38,7 @@ from ortools.sat.python import cp_model
 @dataclass(frozen=True)
 class ProblemData:
 	# Original (base) nurses who can perform Day (D) and Night (N) shifts
-	base_nurses: int = 19
+	base_nurses: int = 21
 	# Additional nurses performing only 8h shifts (R8) on workdays; no nights, no weekends
 	extra_nurses: int = 1
 	num_days: int = 31  # 4 weeks (28) + 3 workdays
