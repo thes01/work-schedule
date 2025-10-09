@@ -1,24 +1,19 @@
 """Monthly nurse scheduling using CP-SAT.
 
 Key rules (updated):
-* Shifts: Day (D, 11h; nurse 1 Mon-Thu 10h), Night (N, 12h), R8 (8h morning), O8 (8h afternoon).
-* New rule: Each base nurse must work exactly one O8 shift (on a workday) in the month.
-* Exactly two O8 shifts per workday overall (was previously one; now increased, counting base + extra nurses).
-* First extra nurse (index 19, nurse no. 20) is R8-only; other extra nurses can take R8 or O8.
+* Shifts: Day (D, 11h; nurse 1 Mon-Thu 10h), Night (N, 12h), R8 (8h morning).
 * Horizon: 31 days (Mon start): 4 full weeks + 3 extra workdays.
-* Base nurses: 19 (indices 0..18). Extra 8h-only nurses: 3 (indices 19..21). Nurse numbering displayed 1-based.
-* Workday demand: total day-like (D+R8+O8) in [9,10]; exactly 1 night; exactly 2 O8.
-* Weekend demand: day D in [5,6]; exactly 1 night; extra nurses off (no O8 on weekends).
+* Base nurses: 19 (indices 0..18). Extra 8h-only nurses: 1 (index 19). Nurse numbering displayed 1-based.
+* Workday demand: total day-like (D+R8) in [9,10]; exactly 1 night.
+* Weekend demand: day D in [5,6]; exactly 1 night; extra nurses off.
 * Base nurse hours normally in [143,146] except:
 		- Nurse 1 (index 0): custom 10h for Mon-Thu day shifts.
-        - Nurse 2 (index 1): reduced schedule 106..109 TOTAL hours and excluded from hour deviation penalties.
-        - Nurse 3 (index 2): NO night shifts allowed (pure day-like + one O8).
-* Extra nurses each exactly 136h (17×8h); first extra only R8.
+        - Nurse 3 (index 2): NO night shifts allowed (pure day-like).
+* Extra nurse (nurse 20): exactly 136h (17×8h); R8 only.
 * Night shift limits: each base nurse (except nurse 3) must have at least 1 and at most 3 night shifts; nurse 3 none; rest rules for singletons and pairs (N,N) with required off days.
-* Extra nurse O8 balance: Remaining required O8 workday shifts (after assigning one O8 to each base nurse) are softly balanced between the last two extra nurses (numbers 21 and 22); objective penalizes their O8 count difference (aiming for equality without forcing infeasibility).
-* No 3 consecutive day-like shifts (D or O8) for any base nurse.
+* No 3 consecutive day-like shifts (D) for any base nurse.
 * Weekend workload balanced: each base nurse has 2 or 3 weekend shifts; pairwise difference ≤ 1.
-* Objective: minimize (1) sum of absolute deviations from target hours (excluding reduced nurse 2), (2) night distribution deviation, (3) surplus day-like shifts above theoretical minimum.
+* Objective: minimize (1) sum of absolute deviations from target hours, (2) night distribution deviation, (3) surplus day-like shifts above theoretical minimum.
 
 Outputs: textual summary + Excel schedule with color coding and legends.
 """
@@ -44,12 +39,12 @@ from ortools.sat.python import cp_model
 class ProblemData:
 	# Original (base) nurses who can perform Day (D) and Night (N) shifts
 	base_nurses: int = 19
-	# Additional nurses performing only 8h shifts (R8, O8) on workdays; no nights, no weekends
-	extra_nurses: int = 3
+	# Additional nurses performing only 8h shifts (R8) on workdays; no nights, no weekends
+	extra_nurses: int = 1
 	num_days: int = 31  # 4 weeks (28) + 3 workdays
 	day_shift_hours: int = 11  # Standard day hours (nurse 1 has custom 10h Mon-Thu non-weekend)
 	night_shift_hours: int = 11 
-	eight_hour_shift_hours: int = 8  # R8 / O8
+	eight_hour_shift_hours: int = 8  # R8
 	min_hours: int = 140  # base nurse min hours
 	max_hours: int = 146  # base nurse max hours
 	target_hours: int = 145  # balancing target (base nurses only)
@@ -64,7 +59,7 @@ class ProblemData:
 
 
 def build_and_solve(data: ProblemData) -> None:
-	"""Builds and solves the extended model with extra 8h shift nurses (R8/O8)."""
+	"""Builds and solves the extended model with extra 8h shift nurses (R8)."""
 	model = cp_model.CpModel()
 
 	# Indices
@@ -74,7 +69,7 @@ def build_and_solve(data: ProblemData) -> None:
 	days = list(range(data.num_days))
 
 	# Shift indices
-	D, N, R8, O8 = 0, 1, 2, 3
+	D, N, R8 = 0, 1, 2
 
 	# Helper: weekend detection
 	def is_weekend(day: int) -> bool:
@@ -90,25 +85,22 @@ def build_and_solve(data: ProblemData) -> None:
 	nurse_shifts: Dict[int, Tuple[int, ...]] = {}
 	for n in nurses:
 		if n in base_nurses:
-			# Base nurses now can also take one O8 (exactly one over month enforced later)
+			# Base nurses can take Day or Night shifts
 			# Nurse index 2 (number 3) is forbidden from night shifts.
 			if n == 2:
-				nurse_shifts[n] = (D, O8)
+				nurse_shifts[n] = (D,)
 			else:
-				nurse_shifts[n] = (D, N, O8)
+				nurse_shifts[n] = (D, N)
 		else:
-			# Extra nurses: first extra (n == base_nurses[0] + base_nurses count) is R8-only (nurse number 20) per new requirement
-			if n == data.base_nurses:  # zero-based index 19 => nurse no. 20
-				nurse_shifts[n] = (R8,)
-			else:
-				nurse_shifts[n] = (R8, O8)
+			# Extra nurse (index 19, nurse number 20) is R8-only
+			nurse_shifts[n] = (R8,)
 
 	# Decision variables only for allowed shifts
 	x: Dict[Tuple[int, int, int], cp_model.IntVar] = {}
 	for n in nurses:
 		for d in days:
 			for s in nurse_shifts[n]:
-				label = {D: 'D', N: 'N', R8: 'R8', O8: 'O8'}[s]
+				label = {D: 'D', N: 'N', R8: 'R8'}[s]
 				x[(n, d, s)] = model.new_bool_var(f"x_n{n}_d{d}_{label}")
 
 	# 1) At most one shift per nurse per day
@@ -117,22 +109,14 @@ def build_and_solve(data: ProblemData) -> None:
 			model.add_at_most_one(x[(n, d, s)] for s in nurse_shifts[n])
 
 	# 2) Daily demand constraints
-	# Workdays: (D + R8 + O8) in [workday_shift_min, workday_shift_max]; exactly 1 night (base nurses only); EXACTLY two O8 across all eligible nurses.
+	# Workdays: (D + R8) in [workday_shift_min, workday_shift_max]; exactly 1 night (base nurses only).
 	for d in workdays:
 		day_like = []
 		day_like.extend(x[(n, d, D)] for n in base_nurses if (n, d, D) in x)
-		# base nurse O8 (one per nurse overall) counts as day-like
-		day_like.extend(x[(n, d, O8)] for n in base_nurses if (n, d, O8) in x)
-		# extra nurse R8/O8
-		day_like.extend(x[(n, d, s)] for n in extra_nurses for s in (R8, O8) if (n, d, s) in x)
+		# extra nurse R8
+		day_like.extend(x[(n, d, R8)] for n in extra_nurses if (n, d, R8) in x)
 		model.add_linear_constraint(sum(day_like), data.workday_shift_min, data.workday_shift_max)
 		model.add(sum(x[(n, d, N)] for n in base_nurses if (n, d, N) in x) == 1)
-		# Exactly two O8 across all nurses that can perform O8 (exclude R8-only extra)
-		model.add(
-			sum(x[(n, d, O8)] for n in base_nurses if (n, d, O8) in x)
-			+ sum(x[(n, d, O8)] for n in extra_nurses if (n, d, O8) in x)
-			== 2
-		)
 	# Weekends: (D) in [5,6]; exactly 1 night; extra nurses off.
 	for d in weekend_days:
 		model.add_linear_constraint(sum(x[(n, d, D)] for n in base_nurses if (n, d, D) in x), data.weekend_shift_min, data.weekend_shift_max)
@@ -140,33 +124,13 @@ def build_and_solve(data: ProblemData) -> None:
 		for n in extra_nurses:
 			for s in nurse_shifts[n]:
 				model.add(x[(n, d, s)] == 0)
-		# No O8 for base nurses on weekends
-		for n in base_nurses:
-			if (n, d, O8) in x:
-				model.add(x[(n, d, O8)] == 0)
-
-	# Each base nurse exactly one O8 over all workdays
-	for n in base_nurses:
-		model.add(sum(x[(n, d, O8)] for d in workdays if (n, d, O8) in x) == 1)
-
-	# Soft balance O8 between last two extra nurses (indices 20 and 21): add penalty for difference
-	o8_balance_diff = None
-	if len(extra_nurses) >= 3:
-		last_two = extra_nurses[1:]  # e.g. [20,21]
-		if len(last_two) == 2:
-			count_a = sum(x[(last_two[0], d, O8)] for d in workdays if (last_two[0], d, O8) in x)
-			count_b = sum(x[(last_two[1], d, O8)] for d in workdays if (last_two[1], d, O8) in x)
-			# Absolute difference via single int var >= both (a-b) and (b-a)
-			o8_balance_diff = model.new_int_var(0, len(workdays), "o8_last_two_diff")
-			model.add(count_a - count_b <= o8_balance_diff)
-			model.add(count_b - count_a <= o8_balance_diff)
 
 	# 3) Hours per nurse
 	hours: List[cp_model.LinearExpr] = [0] * len(nurses)
 	deviations: List[cp_model.IntVar] = []  # base nurses only
 	for n in nurses:
 		if n in base_nurses:
-			# Day hours with custom rule for nurse index 0 (Mon-Thu =10h) plus O8 (8h) and night
+			# Day hours with custom rule for nurse index 0 (Mon-Thu =10h)
 			day_terms = []
 			for d in days:
 				if (n, d, D) in x:
@@ -176,23 +140,18 @@ def build_and_solve(data: ProblemData) -> None:
 						if (not is_weekend(d)) and dow in (0, 1, 2, 3):
 							coef = 10
 					day_terms.append(coef * x[(n, d, D)])
-			# O8 hours
-			o8_hours = data.eight_hour_shift_hours * sum(x[(n, d, O8)] for d in days if (n, d, O8) in x)
 			day_hours = sum(day_terms) if day_terms else 0
 			night_hours = data.night_shift_hours * sum(x[(n, d, N)] for d in days if (n, d, N) in x)
-			h = day_hours + night_hours + o8_hours
+			h = day_hours + night_hours
 			hours[n] = h
-			if n == 1:
-				# Nurse number 2 (index 1) reduced schedule 106..110 hours; exclude from deviation penalties
-				model.add_linear_constraint(h, 106, 110)
-			else:
-				model.add_linear_constraint(h, data.min_hours, data.max_hours)
-				pos = model.new_int_var(0, data.max_hours - data.target_hours, f"dev_pos_{n}")
-				neg = model.new_int_var(0, data.target_hours - data.min_hours, f"dev_neg_{n}")
-				model.add(h - data.target_hours == pos - neg)
-				dev = model.new_int_var(0, data.max_hours - data.min_hours, f"dev_abs_{n}")
-				model.add(dev == pos + neg)
-				deviations.append(dev)
+			# All base nurses have same hour constraints
+			model.add_linear_constraint(h, data.min_hours, data.max_hours)
+			pos = model.new_int_var(0, data.max_hours - data.target_hours, f"dev_pos_{n}")
+			neg = model.new_int_var(0, data.target_hours - data.min_hours, f"dev_neg_{n}")
+			model.add(h - data.target_hours == pos - neg)
+			dev = model.new_int_var(0, data.max_hours - data.min_hours, f"dev_abs_{n}")
+			model.add(dev == pos + neg)
+			deviations.append(dev)
 		else:
 			# Extra nurse exact 17 * 8h = 136h
 			shift_sum = sum(x[(n, d, s)] for d in workdays for s in nurse_shifts[n] if (n, d, s) in x)
@@ -200,14 +159,14 @@ def build_and_solve(data: ProblemData) -> None:
 			hours[n] = h
 			model.add(h == 17 * data.eight_hour_shift_hours)
 
-	# 4) No 3 consecutive day-like (D or O8) shifts for the base nurses
+	# 4) No 3 consecutive day-like (D) shifts for the base nurses
 	for n in base_nurses:
 		for d in range(data.num_days - 2):
-			# Variables (n, d+i, D/O8) always exist for base nurses due to nurse_shifts definition
+			# Variables (n, d+i, D) always exist for base nurses due to nurse_shifts definition
 			model.add(
-				x[(n, d, D)] + x[(n, d, O8)]
-				+ x[(n, d + 1, D)] + x[(n, d + 1, O8)]
-				+ x[(n, d + 2, D)] + x[(n, d + 2, O8)]
+				x[(n, d, D)]
+				+ x[(n, d + 1, D)]
+				+ x[(n, d + 2, D)]
 				<= 2
 			)
 
@@ -294,8 +253,7 @@ def build_and_solve(data: ProblemData) -> None:
 	# 8) Objective components
 	total_day_shifts = (
 		sum(x[(n, d, D)] for n in base_nurses for d in days if (n, d, D) in x)
-		+ sum(x[(n, d, O8)] for n in base_nurses for d in workdays if (n, d, O8) in x)
-		+ sum(x[(n, d, s)] for n in extra_nurses for d in workdays for s in (R8, O8) if (n, d, s) in x)
+		+ sum(x[(n, d, R8)] for n in extra_nurses for d in workdays if (n, d, R8) in x)
 	)
 	min_needed_day_shifts = 9 * len(workdays) + 5 * len(weekend_days)
 	surplus = model.new_int_var(0, data.num_days * data.num_nurses, "day_surplus")
@@ -318,10 +276,7 @@ def build_and_solve(data: ProblemData) -> None:
 	W_HOURS = 100
 	W_NIGHT_DEV = 10
 	W_SURPLUS = 1
-	W_O8_BAL = 5  # soft penalty to encourage equal O8 distribution between last two extras
 	objective_terms = [W_HOURS * sum(deviations), W_NIGHT_DEV * sum(night_devs), W_SURPLUS * surplus]
-	if o8_balance_diff is not None:
-		objective_terms.append(W_O8_BAL * o8_balance_diff)
 	model.minimize(sum(objective_terms))
 
 	# Solve
@@ -344,7 +299,7 @@ def build_and_solve(data: ProblemData) -> None:
 		night_count = 0
 		for d in days:
 			for s in nurse_shifts[n]:
-				if s in (D, R8, O8) and (n, d, s) in x and solver.boolean_value(x[(n, d, s)]):
+				if s in (D, R8) and (n, d, s) in x and solver.boolean_value(x[(n, d, s)]):
 					day_like_count += 1
 				if s == N and (n, d, N) in x and solver.boolean_value(x[(n, d, N)]):
 					night_count += 1
@@ -354,9 +309,7 @@ def build_and_solve(data: ProblemData) -> None:
 			for s in nurse_shifts[n]
 			if (n, d, s) in x
 		)
-		if n == 1:
-			label = f"Nurse {n:2d} (reduced):"
-		elif n == 2:
+		if n == 2:
 			label = f"Nurse {n:2d} (no nights):"
 		else:
 			label = f"Nurse {n:2d}:"
@@ -367,7 +320,7 @@ def build_and_solve(data: ProblemData) -> None:
 	print(f"Total day-like shifts: {solver.value(total_day_shifts)} (min theoretical {min_needed_day_shifts})")
 	print(f"Objective value: {solver.objective_value}")
 
-	# Excel export (extended with distinct R8/O8 formatting)
+	# Excel export (extended with distinct R8 formatting)
 	if Workbook is None:
 		print("openpyxl not installed: skipping Excel export. Install 'openpyxl' to enable.")
 	else:
@@ -378,14 +331,13 @@ def build_and_solve(data: ProblemData) -> None:
 		for d in days:
 			ws.cell(row=1, column=2 + d, value=d + 1)
 
-		day_counts = [0] * data.num_days  # total day-like (D + R8 + O8)
+		day_counts = [0] * data.num_days  # total day-like (D + R8)
 		night_counts = [0] * data.num_days
 
 		WE_FILL = PatternFill(start_color="FFE9CC", end_color="FFE9CC", fill_type="solid")
 		D_FILL = PatternFill(start_color="E0F4FF", end_color="E0F4FF", fill_type="solid")
 		N_FILL = PatternFill(start_color="FFE0E0", end_color="FFE0E0", fill_type="solid")
 		R8_FILL = PatternFill(start_color="C6F6D5", end_color="C6F6D5", fill_type="solid")  # light green
-		O8_FILL = PatternFill(start_color="E9D8FD", end_color="E9D8FD", fill_type="solid")  # light purple
 		HEADER_FILL = PatternFill(start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
 
 		for c in range(1, data.num_days + 2):
@@ -426,12 +378,6 @@ def build_and_solve(data: ProblemData) -> None:
 					row_day_like += 1
 					day_counts[d] += 1
 					cell.fill = D_FILL
-				elif (n, d, O8) in x and solver.boolean_value(x[(n, d, O8)]):
-					val_display = "O8"
-					row_day_like += 1
-					row_hours += data.eight_hour_shift_hours
-					day_counts[d] += 1
-					cell.fill = O8_FILL
 				elif (n, d, R8) in x and solver.boolean_value(x[(n, d, R8)]):
 					val_display = "R8"
 					row_day_like += 1
@@ -454,10 +400,7 @@ def build_and_solve(data: ProblemData) -> None:
 		if extra_nurses:
 			first_extra = extra_nurses[0]  # nurse 20 (index 19) R8-only
 			cell_extra = ws.cell(row=2 + first_extra, column=1)
-			cell_extra.comment = Comment("Pečovatelka 20: Pouze R8 (bez O8). Ostatní extra: R8/O8. 2 O8 za pracovní den.", "System")
-		# Comment for reduced nurse 2
-		reduced_cell = ws.cell(row=2 + 1, column=1)
-		reduced_cell.comment = Comment("Pečovatelka 2: Snížený úvazek 106-109 hodin.", "System")
+			cell_extra.comment = Comment("Pečovatelka 20: Pouze R8.", "System")
 		# Comment for nurse 3 no nights
 		no_night_cell = ws.cell(row=2 + 2, column=1)
 		no_night_cell.comment = Comment("Pečovatelka 3: Bez nočních směn.", "System")
@@ -486,12 +429,8 @@ def build_and_solve(data: ProblemData) -> None:
 		# Legend (placed below summaries)
 		legend_row = night_sum_row + 2
 		ws.cell(row=legend_row, column=1, value="Legenda:")
-		# ws.cell(row=legend_row, column=2, value="D=Day 11h")
-		# ws.cell(row=legend_row, column=5, value="N=Noční 11h")
 		ws.cell(row=legend_row, column=7, value="R8=Ranní 8h")
-		ws.cell(row=legend_row, column=9, value="O8=Odpolední 8h (2 za den)")
 		ws.cell(row=legend_row, column=7).fill = R8_FILL
-		ws.cell(row=legend_row, column=9).fill = O8_FILL
 
 		from openpyxl.utils import get_column_letter
 		for col in range(1, 4 + data.num_days):
