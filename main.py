@@ -43,7 +43,7 @@ class ProblemData:
 	extra_nurses: int = 1
 	num_days: int = 31  # 4 weeks (28) + 3 workdays
 	day_shift_hours: int = 11  # Standard day hours (nurse 1 has custom 10h Mon-Thu non-weekend)
-	night_shift_hours: int = 11 
+	night_shift_hours: int = 12
 	eight_hour_shift_hours: int = 8  # R8
 	min_hours: int = 140  # base nurse min hours
 	max_hours: int = 146  # base nurse max hours
@@ -357,7 +357,7 @@ def build_and_solve(data: ProblemData) -> None:
 				val_display = ""
 				is_we = is_weekend(d)
 				if (n, d, N) in x and solver.boolean_value(x[(n, d, N)]):
-					val_display = str(data.night_shift_hours)
+					val_display = "N" + str(data.night_shift_hours)
 					row_night += 1
 					row_hours += data.night_shift_hours
 					night_counts[d] += 1
